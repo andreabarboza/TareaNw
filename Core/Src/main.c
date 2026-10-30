@@ -48,15 +48,87 @@
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_TIM1_Init(void);
-static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+#define T_GIRO_90 700   // ms que tarda en girar 90° sobre su eje (calibrar)
 
+// Pines
+#define MI_EN  GPIO_PIN_3
+#define MI_ATR GPIO_PIN_1
+#define MI_ADE GPIO_PIN_2
+#define MD_EN  GPIO_PIN_6
+#define MD_ATR GPIO_PIN_5
+#define MD_ADE GPIO_PIN_4
+
+// Orientación actual en grados: 0 = arriba, 90 = derecha, 180 = abajo, 270 = izquierda
+int orientacion = 0;
+
+void motorIzq(int dir) {   // 1 adelante, -1 atrás, 0 parar
+  HAL_GPIO_WritePin(GPIOA, MI_EN,  dir != 0 ? GPIO_PIN_SET : GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, MI_ADE, dir > 0  ? GPIO_PIN_SET : GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, MI_ATR, dir < 0  ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
+
+void motorDer(int dir) {
+  HAL_GPIO_WritePin(GPIOA, MD_EN,  dir != 0 ? GPIO_PIN_SET : GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, MD_ADE, dir > 0  ? GPIO_PIN_SET : GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, MD_ATR, dir < 0  ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
+
+void parar(void)    { motorIzq(0);  motorDer(0); }
+void adelante(void) { motorIzq(1);  motorDer(1); }
+
+  motorIzq(-1); motorDer(1);
+  HAL_Delay(ms);
+  parar();
+  orientacion = (((orientacion - (int)(ms * 90 / T_GIRO_90)) % 360) + 360) % 360;
+}
+
+void girarDerMs(uint32_t ms) {
+  motorIzq(1); motorDer(-1);
+  HAL_Delay(ms);
+  parar();
+  orientacion = (orientacion + (int)(ms * 90 / T_GIRO_90)) % 360;
+}
+
+void orientar(int objetivo) {
+  int diff = (((objetivo - orientacion) % 360) + 360) % 360;
+  if (diff == 0) return;
+  if (diff <= 180) girarDerMs((uint32_t)T_GIRO_90 * diff / 90);
+  else             girarIzqMs((uint32_t)T_GIRO_90 * (360 - diff) / 90);
+  orientacion = objetivo;
+  HAL_Delay(300);
+}
+
+// 1) Vueltas hacia la izquierda, 5 s
+void secuencia1(void) {
+  girarIzqMs(5000);
+  HAL_Delay(500);
+}
+
+// 2) Vueltas hacia la derecha, 3 s
+void secuencia2(void) {
+  orientar(90);
+  adelante(); HAL_Delay(3000); parar();
+  HAL_Delay(500);
+}
+
+// 3) Recto hacia arriba, 2 s
+void secuencia3(void) {
+  orientar(180);
+  adelante(); HAL_Delay(2000); parar();
+  HAL_Delay(500);
+}
+
+// 4) Vueltas hacia la izquierda, 2 s
+void secuencia4(void) {
+  orientar(0);
+  girarIzqMs(2000);
+}
 /* USER CODE END 0 */
 
 /**
@@ -89,17 +161,21 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_Base_Start_IT(&htim1);
-  HAL_TIM_Base_Start_IT(&htim3);
+  parar();
+  HAL_Delay(1000);
 
+  motorIzq(1);               HAL_Delay(3000); parar(); HAL_Delay(1500);  // A) solo izquierda adelante
+  motorDer(1);               HAL_Delay(3000); parar(); HAL_Delay(1500);  // B) solo derecha adelante
+  adelante();                HAL_Delay(3000); parar(); HAL_Delay(1500);  // C) ambas adelante
+  motorIzq(-1); motorDer(1); HAL_Delay(3000); parar();                   // D) giro sobre el eje
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-    HAL_Delay(500);
+    // HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+    // HAL_Delay(500);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -149,97 +225,6 @@ void SystemClock_Config(void)
 }
 
 /**
-  * @brief TIM1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM1_Init(void)
-{
-
-  /* USER CODE BEGIN TIM1_Init 0 */
-
-  /* USER CODE END TIM1_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  /* USER CODE BEGIN TIM1_Init 1 */
-
-  /* USER CODE END TIM1_Init 1 */
-  htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 16000-1;
-  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 100-1;
-  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim1.Init.RepetitionCounter = 0;
-  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM1_Init 2 */
-
-  /* USER CODE END TIM1_Init 2 */
-
-}
-
-/**
-  * @brief TIM3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM3_Init(void)
-{
-
-  /* USER CODE BEGIN TIM3_Init 0 */
-
-  /* USER CODE END TIM3_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  /* USER CODE BEGIN TIM3_Init 1 */
-
-  /* USER CODE END TIM3_Init 1 */
-  htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 16000-1;
-  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 2000-1;
-  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM3_Init 2 */
-
-  /* USER CODE END TIM3_Init 2 */
-
-}
-
-/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -255,10 +240,13 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, LED_Pin|LED2_Pin|LED3_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, A1_Pin|A2_Pin|A3_Pin|A4_Pin
+                          |A5_Pin|A6_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : LED_Pin LED2_Pin LED3_Pin */
-  GPIO_InitStruct.Pin = LED_Pin|LED2_Pin|LED3_Pin;
+  /*Configure GPIO pins : A1_Pin A2_Pin A3_Pin A4_Pin
+                           A5_Pin A6_Pin */
+  GPIO_InitStruct.Pin = A1_Pin|A2_Pin|A3_Pin|A4_Pin
+                          |A5_Pin|A6_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
